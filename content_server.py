@@ -177,10 +177,10 @@ class ContentServer:
     def check_neighbor_timeouts(self):
         now = time.time()
         with self.lock:
-            to_remove = [
-                peer_uuid for peer_uuid, info in self.neighbors.items()
-                if now - info['last_seen'] > KEEPALIVE_TIMEOUT
-            ]
+            to_remove = []
+            for peer_uuid, info in self.neighbors.items():
+                if now - info['last_seen'] > KEEPALIVE_TIMEOUT:
+                    to_remove.append(peer_uuid)
             for peer_uuid in to_remove:
                 del self.neighbors[peer_uuid]
 
@@ -217,7 +217,9 @@ class ContentServer:
             time.sleep(1)
 
     def dijkstra(self):
-        graph = {node: lsa['neighbors'] for node, lsa in self.lsdb.items()}
+        graph = {}
+        for node, lsa in self.lsdb.items():
+            graph[node] = lsa['neighbors']
         distances = {self.uuid: 0}
         visited = set()
 
@@ -226,7 +228,7 @@ class ContentServer:
             min_dist = float('inf')
 
             for node in graph:
-                if node not in visited and distances.get(node, float('inf')) < min_dist:
+                if (node not in visited and distances.get(node, float('inf')) < min_dist):
                     min_dist = distances[node]
                     current = node
 
@@ -261,19 +263,25 @@ class ContentServer:
 
     def get_map(self):
         with self.lock:
-            result = {}
+            # Get reachable nodes using Dijkstra
             distances = self.dijkstra()
-            reachable = {}
+            reachable_nodes = set()
             for node, dist in distances.items():
                 if dist != float('inf'):
-                    distances.add(node)
-            for node_uuid, lsa in reachable:
+                    reachable_nodes.add(node)
+            
+            result = {}
+            for node_uuid in reachable_nodes:
+                if node_uuid not in self.lsdb:
+                    continue
+                    
+                lsa = self.lsdb[node_uuid]
                 node_name = self.neighbor_names.get(
                     node_uuid, self.name if node_uuid == self.uuid else node_uuid
                 )
                 neighbors = {}
                 for neighbor_uuid, metric in lsa['neighbors'].items():
-                    if neighbor_uuid in self.lsdb:
+                    if neighbor_uuid in reachable_nodes:
                         neighbor_name = self.neighbor_names.get(neighbor_uuid, neighbor_uuid)
                         neighbors[neighbor_name] = metric
                 result[node_name] = neighbors
